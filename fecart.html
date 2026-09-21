@@ -1,0 +1,326 @@
+from pathlib import Path
+
+src = Path("/mnt/data/cyber_defense.html")
+out = Path("/mnt/data/cibernetico.html")
+
+html = src.read_text(encoding="utf-8")
+
+# Branding
+html = html.replace("<title>CYBER DEFENSE 5.0</title>", "<title>CIBERNETICO</title>")
+html = html.replace("CYBER DEFENSE 5.0", "CIBERNETICO")
+html = html.replace("CYBER DEFENSE", "CIBERNETICO")
+
+# Ranking button
+html = html.replace(
+    '<button id="progressBtn" class="btn">▣ Meu Progresso</button>',
+    '<button id="progressBtn" class="btn">▣ Meu Progresso</button>\n'
+    '<button id="rankingBtn" class="btn">🏆 Ranking</button>'
+)
+
+# Ranking screen
+ranking_screen = '''
+  <div id="rankingScreen" class="screen hidden">
+    <div class="panel">
+      <div class="topline">
+        <div>
+          <h2>🏆 Ranking Local</h2>
+          <div class="small">Melhores pontuações salvas neste navegador.</div>
+        </div>
+        <button class="btn secondary backMenu">Voltar</button>
+      </div>
+      <div id="rankingList" class="vocab"></div>
+    </div>
+  </div>
+'''
+html = html.replace(
+    '  <div id="vocabScreen" class="screen hidden">',
+    ranking_screen + '\n  <div id="vocabScreen" class="screen hidden">'
+)
+
+# Boss HUD
+html = html.replace(
+    '<div id="typingInfo" class="hudBox">',
+    '''<div id="bossHud" class="hudBox hidden" style="position:absolute;left:50%;top:92px;transform:translateX(-50%);min-width:min(520px,85vw);text-align:center;border-color:rgba(255,77,109,.55)">
+      <span>CHEFE</span><b id="bossName">PROTOCOLO CORROMPIDO</b>
+      <div class="meterWrap" style="margin-top:8px"><div id="bossMeter" style="height:100%;width:100%;background:#ff4d6d;transition:.12s"></div></div>
+    </div>
+    <div id="typingInfo" class="hudBox">'''
+)
+
+# Add ranking to screens object
+html = html.replace(
+    '  settings: document.getElementById("settingsScreen"),\n  gameover:',
+    '  settings: document.getElementById("settingsScreen"),\n  ranking: document.getElementById("rankingScreen"),\n  gameover:'
+)
+
+# Add boss state
+html = html.replace(
+    '  lastHitWord:null,\n  music:true,',
+    '  lastHitWord:null,\n  boss:null,\n  bossTimer:0,\n  bossDefeated:false,\n  music:true,'
+)
+
+# Ranking functions
+marker = "function renderProgress(){"
+ranking_js = '''
+function getLeaderboard(){
+  try{
+    const raw=localStorage.getItem("ciberneticoLeaderboard");
+    const list=raw?JSON.parse(raw):[];
+    return Array.isArray(list)?list:[];
+  }catch(e){return [];}
+}
+function recordLeaderboard(){
+  if(!account)return;
+  const list=getLeaderboard();
+  const found=list.find(x=>x.username===account.username);
+  if(found){
+    found.highScore=Math.max(found.highScore,state.score);
+    found.wave=Math.max(found.wave,state.wave);
+    found.enemies=Math.max(found.enemies,account.stats.enemiesDestroyed);
+  }else{
+    list.push({
+      username:account.username,
+      highScore:state.score,
+      wave:state.wave,
+      enemies:account.stats.enemiesDestroyed
+    });
+  }
+  list.sort((a,b)=>b.highScore-a.highScore);
+  localStorage.setItem("ciberneticoLeaderboard",JSON.stringify(list.slice(0,20)));
+}
+function renderRanking(){
+  const el=document.getElementById("rankingList");
+  const list=getLeaderboard();
+  if(!list.length){
+    el.innerHTML='<div class="wordCard"><strong>Ainda não há jogadores no ranking.</strong><div class="small" style="margin-top:6px">Jogue uma partida para registrar sua pontuação.</div></div>';
+    return;
+  }
+  el.innerHTML=list.map((p,i)=>{
+    const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}º`;
+    const current=account&&p.username===account.username?' style="border-color:rgba(92,255,157,.5)"':"";
+    return `<div class="wordCard"${current}>
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+        <strong>${medal} ${escapeHtml(p.username)}</strong>
+        <b style="color:#ffd166">${p.highScore} pts</b>
+      </div>
+      <div class="small" style="margin-top:6px">Onda ${p.wave} • ${p.enemies} inimigos destruídos</div>
+    </div>`;
+  }).join("");
+}
+
+'''
+html = html.replace(marker, ranking_js + marker)
+
+# Ranking button event
+html = html.replace(
+    'document.getElementById("progressBtn").addEventListener("click", () => { renderProgress(); showScreen("progress"); });',
+    'document.getElementById("progressBtn").addEventListener("click", () => { renderProgress(); showScreen("progress"); });\n'
+    'document.getElementById("rankingBtn").addEventListener("click", () => { renderRanking(); showScreen("ranking"); });'
+)
+
+# Reset boss on game start
+html = html.replace(
+    '  state.lastHitWord = null;\n  state.gameStart = performance.now();',
+    '  state.lastHitWord = null;\n  state.boss = null;\n  state.bossTimer = 0;\n  state.bossDefeated = false;\n  document.getElementById("bossHud").classList.add("hidden");\n  state.gameStart = performance.now();'
+)
+
+# Record leaderboard on game end
+html = html.replace(
+    '    saveAccount();\n  }\n  document.getElementById("finalScore")',
+    '    saveAccount();\n  }\n  recordLeaderboard();\n  document.getElementById("finalScore")'
+)
+
+# Boss logic
+marker = "function update(dt){"
+boss_js = '''
+function spawnBoss(){
+  if(state.boss||!state.active)return;
+  const bosses=[
+    {name:"PHANTOM",title:"INFILTRADOR DE REDE",hp:18,color:"#ff4d6d",words:["phishing","malware","senha","link","golpe"]},
+    {name:"RANSOM",title:"SEQUESTRADOR DE DADOS",hp:24,color:"#ffd166",words:["ransomware","backup","dados","criptografia","bloqueio"]},
+    {name:"ZERO DAY",title:"AMEAÇA DESCONHECIDA",hp:30,color:"#8a5cff",words:["vulnerabilidade","autenticação","atualização","privacidade","verificação"]}
+  ];
+  const b=bosses[Math.floor(Math.random()*bosses.length)];
+  state.boss={...b,x:innerWidth/2,y:-120,targetY:150,phase:0,currentWord:null,wordIndex:0};
+  b.maxHp=b.hp;
+  state.boss.maxHp=b.hp;
+  state.target=null;
+  updateBossHud();
+}
+function updateBossHud(){
+  const b=state.boss;
+  const el=document.getElementById("bossHud");
+  if(!b){el.classList.add("hidden");return;}
+  el.classList.remove("hidden");
+  document.getElementById("bossName").textContent=`${b.name} — ${b.title}`;
+  document.getElementById("bossMeter").style.width=`${Math.max(0,b.hp)/b.maxHp*100}%`;
+}
+function hitBoss(){
+  const b=state.boss;
+  if(!b)return;
+  b.hp--;
+  state.score+=25*state.combo;
+  fireLaser({x:b.x,y:b.y});
+  laserSound();
+
+  for(let i=0;i<6;i++){
+    const a=Math.random()*Math.PI*2,sp=40+Math.random()*100;
+    state.particles.push({
+      x:b.x,y:b.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:.25+Math.random()*.2,size:2+Math.random()*2
+    });
+  }
+
+  if(b.hp<=0){
+    for(let i=0;i<45;i++){
+      const a=Math.random()*Math.PI*2,sp=50+Math.random()*180;
+      state.particles.push({
+        x:b.x,y:b.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+        life:.5+Math.random()*.8,size:1+Math.random()*4
+      });
+    }
+    state.score+=1000+state.wave*150;
+    state.bossDefeated=true;
+    state.boss=null;
+    state.target=null;
+    state.lives=Math.min(3,state.lives+1);
+    explodeSound();
+  }
+  updateBossHud();
+  updateHUD();
+}
+function handleBossKey(key){
+  const b=state.boss;
+  if(!b)return;
+  if(!b.currentWord){
+    b.currentWord=b.words[Math.floor(Math.random()*b.words.length)];
+    b.wordIndex=0;
+  }
+  const expected=b.currentWord[b.wordIndex];
+  if(keyMatches(expected,key)){
+    b.wordIndex++;
+    state.comboHits++;
+    state.combo=Math.min(9,1+Math.floor(state.comboHits/5));
+    hitBoss();
+    if(state.boss&&b.wordIndex>=b.currentWord.length)b.currentWord=null;
+  }else{
+    handleWrongKey();
+  }
+}
+'''
+html = html.replace(marker, boss_js + marker)
+
+# Keyboard boss priority
+html = html.replace(
+    '  if(e.key.length !== 1) return;\n  const key = e.key;\n\n  if(!state.target){',
+    '  if(e.key.length !== 1) return;\n  const key = e.key;\n\n  if(state.boss){ handleBossKey(key); return; }\n\n  if(!state.target){'
+)
+
+# Boss spawn every 35 seconds from wave 3
+html = html.replace(
+    '  state.spawnTimer += dt*1000;\n  state.waveTimer += dt;\n  const interval =',
+    '''  state.spawnTimer += dt*1000;
+  state.waveTimer += dt;
+  state.bossTimer += dt;
+
+  if(!state.boss && state.wave>=3 && state.bossTimer>=35){
+    state.bossTimer=0;
+    spawnBoss();
+  }
+
+  const interval ='''
+)
+
+# Boss movement
+html = html.replace(
+    '  for(const en of state.enemies){',
+    '''  if(state.boss){
+    const b=state.boss;
+    if(b.y<b.targetY)b.y+=70*dt;
+    b.phase+=dt;
+    b.x=innerWidth/2+Math.sin(b.phase*.8)*Math.min(180,innerWidth*.18);
+  }
+
+  for(const en of state.enemies){''',
+    1
+)
+
+# Boss drawing
+marker = "function drawLasers(){"
+boss_draw = '''
+function drawBoss(){
+  const b=state.boss;
+  if(!b)return;
+  ctx.save();
+  ctx.translate(b.x,b.y);
+  const pulse=1+Math.sin(performance.now()/140)*.06;
+  ctx.scale(pulse,pulse);
+  ctx.shadowBlur=32;
+  ctx.shadowColor=b.color;
+  ctx.fillStyle="#260d25";
+  ctx.strokeStyle=b.color;
+  ctx.lineWidth=3;
+
+  ctx.beginPath();
+  for(let i=0;i<12;i++){
+    const a=i/12*Math.PI*2;
+    const r=i%2?58:78;
+    const px=Math.cos(a)*r,py=Math.sin(a)*r;
+    i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+  }
+  ctx.closePath();ctx.fill();ctx.stroke();
+
+  ctx.fillStyle="#0a1025";
+  ctx.beginPath();ctx.arc(0,0,42,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle=b.color;
+  ctx.beginPath();ctx.arc(0,0,42,0,Math.PI*2);ctx.stroke();
+
+  ctx.fillStyle=b.color;
+  ctx.beginPath();ctx.arc(-15,-8,6,0,Math.PI*2);ctx.arc(15,-8,6,0,Math.PI*2);ctx.fill();
+
+  ctx.strokeStyle="#fff";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(-18,16);ctx.quadraticCurveTo(0,28,18,16);ctx.stroke();
+  ctx.restore();
+
+  ctx.font="800 20px Arial";
+  ctx.textAlign="center";
+  ctx.fillStyle="#fff";
+  ctx.fillText(b.currentWord?`ALVO: ${b.currentWord}`:"DIGITE PARA ATACAR",b.x,b.y+105);
+
+  ctx.font="700 13px Arial";
+  ctx.fillStyle=b.color;
+  ctx.fillText(`${b.hp} / ${b.maxHp}`,b.x,b.y-88);
+}
+'''
+html = html.replace(marker, boss_draw + marker)
+
+# Draw boss
+html = html.replace(
+    '    for(const en of state.enemies) if(en.alive) drawEnemy(en);\n    drawLasers();',
+    '    for(const en of state.enemies) if(en.alive) drawEnemy(en);\n    drawBoss();\n    drawLasers();'
+)
+
+# Ranking from game over
+html = html.replace(
+    '<button id="gameOverMenuBtn" class="btn secondary">Menu principal</button>',
+    '<button id="gameOverRankingBtn" class="btn secondary">🏆 Ver ranking</button>\n        <button id="gameOverMenuBtn" class="btn secondary">Menu principal</button>'
+)
+html = html.replace(
+    'document.getElementById("gameOverMenuBtn").addEventListener("click", enterMenu);',
+    'document.getElementById("gameOverMenuBtn").addEventListener("click", enterMenu);\n'
+    'document.getElementById("gameOverRankingBtn").addEventListener("click", () => { renderRanking(); showScreen("ranking"); });'
+)
+
+html = html.replace(
+    "Protótipo local: os dados do perfil ficam salvos somente neste navegador.",
+    "Protótipo local: conta, progresso e ranking ficam salvos somente neste navegador."
+)
+
+html = html.replace(
+    'renderVocab();\n\nif(loadAccount())',
+    'renderVocab();\nrenderRanking();\n\nif(loadAccount())'
+)
+
+out.write_text(html, encoding="utf-8")
+print(f"Arquivo criado: {out}")
+print(f"Tamanho: {out.stat().st_size/1024:.1f} KB")
